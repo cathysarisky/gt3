@@ -153,7 +153,9 @@ async function superUpdateCommand(options, sources) {
 		for (const key of extra) {
 			delete store[key];
 		}
+	}
 
+	for (const [locale, store] of Object.entries(locales)) {
 		const filePath = path.join(outputPath, `${locale}.json`);
 		writePromises.push(fs.writeFile(filePath, stringifyJson(store)));
 		console.log(`\nWrote ${filePath}`);
