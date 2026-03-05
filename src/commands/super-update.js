@@ -154,8 +154,14 @@ async function superUpdateCommand(options, sources) {
 			delete store[key];
 		}
 
+		const sorted = Object.fromEntries(
+			Object.entries(store).sort(([a], [b]) => a.localeCompare(b)),
+		);
+		sorted[NEWLINE] = store[NEWLINE];
+		sorted[INDENTATION] = store[INDENTATION];
+
 		const filePath = path.join(outputPath, `${locale}.json`);
-		writePromises.push(fs.writeFile(filePath, stringifyJson(store)));
+		writePromises.push(fs.writeFile(filePath, stringifyJson(sorted)));
 		console.log(`\nWrote ${filePath}`);
 	}
 
