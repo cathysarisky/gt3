@@ -1,7 +1,13 @@
 // @ts-check
 const {env} = require('node:process');
+const {setTimeout: sleep} = require('node:timers/promises');
 
 const GITHUB_API = 'https://api.github.com';
+const UNAUTHENTICATED_DELAY_MS = 800;
+
+function isAuthenticated() {
+	return Boolean(env.GITHUB_TOKEN);
+}
 
 function getHeaders() {
 	/** @type {Record<string, string>} */
@@ -28,64 +34,56 @@ async function githubGet(url) {
 }
 
 /**
- * Fetch the contents of a single file from GitHub.
- * @param {string} repo - e.g. "TryGhost/Casper"
- * @param {string} ref - e.g. "main"
- * @param {string} filePath - path within the repo
+ * Download raw file content from GitHub (does not count against API rate limit).
+ * @param {string} repo
+ * @param {string} ref
+ * @param {string} filePath
  * @returns {Promise<string>}
  */
-async function fetchFileContent(repo, ref, filePath) {
-	const url = `${GITHUB_API}/repos/${repo}/contents/${filePath}?ref=${ref}`;
-	const data = await githubGet(url);
-	if (data.encoding !== 'base64') {
-		throw new Error(`Unexpected encoding "${data.encoding}" for ${repo}/${filePath}`);
+async function fetchRawContent(repo, ref, filePath) {
+	const url = `https://raw.githubusercontent.com/${repo}/${ref}/${filePath}`;
+	const response = await fetch(url, {headers: {'User-Agent': 'gt3'}});
+	if (!response.ok) {
+		throw new Error(`GitHub raw ${response.status} for ${url}`);
 	}
 
-	return Buffer.from(data.content, 'base64').toString('utf8');
+	return response.text();
 }
 
 /**
- * List directory entries from the GitHub Contents API (non-recursive, one level).
+ * Use the Git Trees API to list all files in a repo (or subtree) in a single request.
+ * Returns only .hbs file paths.
  * @param {string} repo
  * @param {string} ref
- * @param {string} dirPath
- * @returns {Promise<Array<{name: string, path: string, type: string}>>}
- */
-async function listDirectory(repo, ref, dirPath) {
-	const url = `${GITHUB_API}/repos/${repo}/contents/${dirPath}?ref=${ref}`;
-	const data = await githubGet(url);
-	if (!Array.isArray(data)) {
-		throw new Error(`Expected directory listing for ${repo}/${dirPath}, got a single file`);
-	}
-
-	return data;
-}
-
-/**
- * Recursively collect all .hbs file paths under a directory in a GitHub repo.
- * @param {string} repo
- * @param {string} ref
- * @param {string} dirPath
+ * @param {string} [subpath]
  * @returns {Promise<string[]>}
  */
-async function listHbsFilesRecursive(repo, ref, dirPath) {
-	const entries = await listDirectory(repo, ref, dirPath);
-	/** @type {string[]} */
-	const results = [];
-	/** @type {Promise<string[]>[]} */
-	const subdirPromises = [];
-
-	for (const entry of entries) {
-		if (entry.type === 'file' && entry.name.endsWith('.hbs')) {
-			results.push(entry.path);
-		} else if (entry.type === 'dir') {
-			subdirPromises.push(listHbsFilesRecursive(repo, ref, entry.path));
-		}
+async function listHbsFilesViaTree(repo, ref, subpath) {
+	if (!isAuthenticated()) {
+		await sleep(UNAUTHENTICATED_DELAY_MS);
 	}
 
-	const subdirResults = await Promise.all(subdirPromises);
-	for (const files of subdirResults) {
-		results.push(...files);
+	const url = `${GITHUB_API}/repos/${repo}/git/trees/${ref}?recursive=1`;
+	const data = await githubGet(url);
+
+	/** @type {string[]} */
+	const results = [];
+	const prefix = subpath ? `${subpath}/` : '';
+
+	for (const item of data.tree) {
+		if (item.type !== 'blob') {
+			continue;
+		}
+
+		if (!item.path.endsWith('.hbs')) {
+			continue;
+		}
+
+		if (subpath && !item.path.startsWith(prefix)) {
+			continue;
+		}
+
+		results.push(item.path);
 	}
 
 	return results;
@@ -93,6 +91,8 @@ async function listHbsFilesRecursive(repo, ref, dirPath) {
 
 /**
  * Fetch all .hbs files from a GitHub repo (or a subpath within it).
+ * Uses the Git Trees API (1 request) to list files, then raw.githubusercontent.com
+ * to download content (not rate-limited).
  *
  * @param {object} options
  * @param {string} options.repo - e.g. "TryGhost/Casper"
@@ -103,27 +103,44 @@ async function listHbsFilesRecursive(repo, ref, dirPath) {
  */
 async function fetchHbsFiles({repo, ref, path: subpath, files: allowlist}) {
 	const basePath = subpath || '';
+	const throttle = !isAuthenticated();
+
+	/** @type {Array<{repoPath: string, outputPath: string}>} */
+	let filesToFetch;
 
 	if (allowlist && allowlist.length > 0) {
-		const promises = allowlist
+		filesToFetch = allowlist
 			.filter((f) => f.endsWith('.hbs'))
-			.map(async (fileName) => {
-				const filePath = basePath ? `${basePath}/${fileName}` : fileName;
-				const contents = await fetchFileContent(repo, ref, filePath);
-				return {path: fileName, contents};
-			});
-		return Promise.all(promises);
+			.map((fileName) => ({
+				repoPath: basePath ? `${basePath}/${fileName}` : fileName,
+				outputPath: fileName,
+			}));
+	} else {
+		const hbsPaths = await listHbsFilesViaTree(repo, ref, basePath);
+		filesToFetch = hbsPaths.map((filePath) => ({
+			repoPath: filePath,
+			outputPath: basePath ? filePath.slice(basePath.length + 1) : filePath,
+		}));
 	}
 
-	const hbsPaths = await listHbsFilesRecursive(repo, ref, basePath);
+	if (!throttle) {
+		return Promise.all(
+			filesToFetch.map(async ({repoPath, outputPath}) => {
+				const contents = await fetchRawContent(repo, ref, repoPath);
+				return {path: outputPath, contents};
+			}),
+		);
+	}
 
-	const promises = hbsPaths.map(async (filePath) => {
-		const contents = await fetchFileContent(repo, ref, filePath);
-		const relativePath = basePath ? filePath.slice(basePath.length + 1) : filePath;
-		return {path: relativePath, contents};
-	});
+	/** @type {Array<{path: string, contents: string}>} */
+	const results = [];
+	for (const {repoPath, outputPath} of filesToFetch) {
+		const contents = await fetchRawContent(repo, ref, repoPath);
+		results.push({path: outputPath, contents});
+		await sleep(UNAUTHENTICATED_DELAY_MS);
+	}
 
-	return Promise.all(promises);
+	return results;
 }
 
 module.exports.fetchHbsFiles = fetchHbsFiles;

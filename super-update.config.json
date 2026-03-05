@@ -1,5 +1,5 @@
 {
-  "themesRepo": "../Themes",
+  "themesRepo": ".",
   "output": "packages/theme-translations/locales",
   "themePackages": {
     "path": "packages",

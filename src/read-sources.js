@@ -138,12 +138,12 @@ async function listThemePackages(packagesDir, exclude) {
 /**
  * Resolve an external source: use local path if available, otherwise fetch from GitHub.
  * @param {SuperUpdateConfig['externalSources'][number]} source
- * @param {string} configDir - directory containing the config file, for resolving relative local paths
+ * @param {string} baseDir - base directory for resolving relative paths (typically cwd)
  * @returns {Promise<Array<{path: string, contents: string}>>}
  */
-async function resolveExternalSource(source, configDir) {
+async function resolveExternalSource(source, baseDir) {
 	if (source.local) {
-		const localPath = path.resolve(configDir, source.local);
+		const localPath = path.resolve(baseDir, source.local);
 		const exists = await fs.stat(localPath).then(
 			(s) => s.isDirectory() || s.isFile(),
 			() => false,
@@ -169,11 +169,11 @@ async function resolveExternalSource(source, configDir) {
 /**
  * Read all sources defined in the config and return merged translation data.
  * @param {SuperUpdateConfig} config
- * @param {string} configDir - directory containing the config file
+ * @param {string} baseDir - base directory for resolving relative paths (typically cwd)
  * @returns {Promise<SourcesResult>}
  */
-async function readSources(config, configDir) {
-	const themesRepoPath = path.resolve(configDir, config.themesRepo);
+async function readSources(config, baseDir) {
+	const themesRepoPath = path.resolve(baseDir, config.themesRepo);
 	const outputPath = path.resolve(themesRepoPath, config.output);
 
 	const visitorContext = TranslatedStringsVisitor.createContext();
@@ -207,7 +207,7 @@ async function readSources(config, configDir) {
 	console.log('Scanning external sources...');
 	for (const source of config.externalSources) {
 		const before = keysBefore();
-		const files = await resolveExternalSource(source, configDir);
+		const files = await resolveExternalSource(source, baseDir);
 		processFiles(files, source.name, visitorContext, keySources);
 		const after = new Set(visitorContext.translatedStrings.keys());
 		const newKeys = [...after].filter((k) => !before.has(k));

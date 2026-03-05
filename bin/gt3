@@ -40,7 +40,7 @@ Commands:
   ci <path-to-theme> : Runs "find" and "status" with --fail. Except for --update, all flags are passed to the commands.
 
   super-update : Scans all Ghost theme sources and updates the shared theme-translations locales and context.json.
-    --config=<path>: Path to config file (default: super-update.config.json in gt3 root)
+    --config=<path>: Path to config file (default: ./super-update.config.json, then bundled default)
     --verbose: Show detailed per-key changes
     --dry-run: Show what would change without writing files
 `.trimStart();
@@ -155,9 +155,15 @@ async function runSuperUpdate(args) {
 	const fs = require('node:fs/promises');
 	const {readSources} = require('../src/read-sources.js');
 
-	const configPath = args.config
-		? path.resolve(args.config)
-		: path.join(__dirname, '..', 'super-update.config.json');
+	let configPath;
+	if (args.config) {
+		configPath = path.resolve(args.config);
+	} else {
+		const cwdConfig = path.resolve('super-update.config.json');
+		const bundledConfig = path.join(__dirname, '..', 'super-update.config.json');
+		const cwdExists = await fs.stat(cwdConfig).then(() => true, () => false);
+		configPath = cwdExists ? cwdConfig : bundledConfig;
+	}
 
 	let configContents;
 	try {
@@ -168,9 +174,9 @@ async function runSuperUpdate(args) {
 	}
 
 	const config = JSON.parse(configContents);
-	const configDir = path.dirname(configPath);
+	const baseDir = process.cwd();
 
-	const sources = await readSources(config, configDir);
+	const sources = await readSources(config, baseDir);
 	const {superUpdateCommand} = require('../src/commands/super-update.js');
 	return superUpdateCommand(args, sources);
 }

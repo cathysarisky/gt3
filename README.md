@@ -87,11 +87,11 @@ All output is written to the configured output directory (default: `Themes/packa
 
 #### Configuration
 
-The config file (`super-update.config.json`) defines where sources live:
+The command looks for `super-update.config.json` in the current working directory first, then falls back to the bundled default in the gt3 package. All paths in the config are resolved relative to cwd.
 
 ```json
 {
-  "themesRepo": "../Themes",
+  "themesRepo": ".",
   "output": "packages/theme-translations/locales",
   "themePackages": {
     "path": "packages",
@@ -130,7 +130,7 @@ The config file (`super-update.config.json`) defines where sources live:
 }
 ```
 
-* **`themesRepo`**: Path to the local Themes repo (required -- it contains both sources and the output directory).
+* **`themesRepo`**: Path to the local Themes repo, relative to cwd (required -- it contains both sources and the output directory). Use `"."` when running from the Themes repo root.
 * **`output`**: Directory within `themesRepo` where locale files are written.
 * **`themePackages`**: Which subdirectories of `themesRepo` to scan as individual themes.
 * **`sharedPartials`**: Path within `themesRepo` for shared partials.
