@@ -19,7 +19,7 @@ GT3 - The Ghost Theme Translation Toolkit
 
 Commands:
 
-  help : Print his help message
+  help : Print this help message
 
   find <path-to-theme> : Finds untranslated strings
     --special-characters: Consider strings of only special characters as untranslated
@@ -30,7 +30,7 @@ Commands:
 
   status <path-to-theme> : Reports the translation status of each locale. Empty translations are ignored.
     --all: Report fully translated locales, not just those with untranslated strings
-		--update: Automatically sync missing/extra strings in the locales
+    --update: Automatically sync missing/extra strings in the locales
     --base-locale=<locale>: Use this locale as the fully translated reference instead of reading the theme
     --fail: Exit with a non-zero exit code if any locales are missing strings
     --strict: When used with --fail, also fail if any locales have extra strings
@@ -38,6 +38,11 @@ Commands:
     --verbose: List the missing/extra strings for each locale
 
   ci <path-to-theme> : Runs "find" and "status" with --fail. Except for --update, all flags are passed to the commands.
+
+  super-update : Scans all Ghost theme sources and updates the shared theme-translations locales and context.json.
+    --config=<path>: Path to config file (default: super-update.config.json in gt3 root)
+    --verbose: Show detailed per-key changes
+    --dry-run: Show what would change without writing files
 `.trimStart();
 
 /**
@@ -53,6 +58,13 @@ const findFlags = ['update', 'fail', 'json', 'verbose', 'special-characters'];
 const statusFlags = ['all', 'verbose', 'json', 'fail', 'strict', 'update'];
 /** @type {import('../src/commands/status.js').Parameter[]} */
 const statusParameters = ['base-lang'];
+
+/** @type {import('../src/commands/super-update.js').Flag[]} */
+const superUpdateFlags = ['verbose', 'dry-run'];
+/** @type {import('../src/commands/super-update.js').Parameter[]} */
+const superUpdateParameters = ['config'];
+
+const STANDALONE_COMMANDS = new Set(['super-update', 'help']);
 
 /**
  * @satisfies {Record<string, CommandDefinition>}
@@ -87,37 +99,44 @@ const commands = {
 			return findResult + statusResult;
 		},
 	},
+	'super-update': {
+		flags: superUpdateFlags,
+		parameters: superUpdateParameters,
+		run: deferredCommand('../src/commands/super-update.js', 'superUpdateCommand'),
+	},
 };
 
-if (argv.length < 4) {
+const commandName = argv[2];
+
+if (!commandName) {
 	console.log(help);
+	exit(1);
+}
 
-	if (argv.length === 3 && argv[2] !== 'help') {
-		console.error('Error: Missing theme path');
-	}
-
+if (!STANDALONE_COMMANDS.has(commandName) && argv.length < 4) {
+	console.log(help);
+	console.error('Error: Missing theme path');
 	exit(1);
 }
 
 function parseCommand() {
-	const commandName = argv[2];
-	const themePath = argv[3];
-
 	if (commandName === 'help') {
 		commands.help.run();
 		exit(0);
 	}
 
 	/** @type {CommandDefinition} */
-	const command = commands[argv[2]];
+	const command = commands[commandName];
 	if (!command) {
-		console.error(`Unknown command: ${argv[2]}`);
+		console.error(`Unknown command: ${commandName}`);
 		console.error(help);
 		exit(1);
 	}
 
 	const minimist = require('minimist');
-	const args = minimist(argv.slice(3));
+	const isStandalone = STANDALONE_COMMANDS.has(commandName);
+	const args = minimist(argv.slice(isStandalone ? 3 : 3));
+	const themePath = isStandalone ? null : argv[3];
 	const flags = command.flags ?? [];
 	const parameters = command.parameters ?? [];
 
@@ -127,11 +146,44 @@ function parseCommand() {
 		args,
 		themePath,
 		command: command.run,
+		isStandalone,
 	};
 }
 
+async function runSuperUpdate(args) {
+	const path = require('node:path');
+	const fs = require('node:fs/promises');
+	const {readSources} = require('../src/read-sources.js');
+
+	const configPath = args.config
+		? path.resolve(args.config)
+		: path.join(__dirname, '..', 'super-update.config.json');
+
+	let configContents;
+	try {
+		configContents = await fs.readFile(configPath, 'utf8');
+	} catch {
+		console.error(`Error: Could not read config file: ${configPath}`);
+		exit(1);
+	}
+
+	const config = JSON.parse(configContents);
+	const configDir = path.dirname(configPath);
+
+	const sources = await readSources(config, configDir);
+	const {superUpdateCommand} = require('../src/commands/super-update.js');
+	return superUpdateCommand(args, sources);
+}
+
 async function run() {
-	const {themePath, args, command} = parseCommand();
+	const {themePath, args, command, isStandalone} = parseCommand();
+
+	if (isStandalone) {
+		const exitCode = await runSuperUpdate(args);
+		exit(exitCode ?? 0);
+		return;
+	}
+
 	const readTheme = require('../src/read-theme.js');
 	const {multiVisitor} = require('../src/ast/visitors/many.js');
 	const visitors = [
