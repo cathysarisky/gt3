@@ -27,6 +27,7 @@ Commands:
     --fail: Exit with a non-zero exit code if any untranslated strings are found. Cannot be used with --update
     --json: Output the results in JSON format
     --verbose: Include file name and line number in the output
+    --packages: Treat each subdirectory of the given path as a separate theme
 
   status <path-to-theme> : Reports the translation status of each locale. Empty translations are ignored.
     --all: Report fully translated locales, not just those with untranslated strings
@@ -36,6 +37,7 @@ Commands:
     --strict: When used with --fail, also fail if any locales have extra strings
     --json: Output the results in JSON format
     --verbose: List the missing/extra strings for each locale
+    --packages: Treat each subdirectory of the given path as a separate theme
 
   ci <path-to-theme> : Runs "find" and "status" with --fail. Except for --update, all flags are passed to the commands.
 
@@ -53,9 +55,9 @@ function deferredCommand(importPath, exportName) {
 }
 
 /** @type {import('../src/commands/find.js').Flag[]} */
-const findFlags = ['update', 'fail', 'json', 'verbose', 'special-characters'];
+const findFlags = ['update', 'fail', 'json', 'verbose', 'special-characters', 'packages'];
 /** @type {import('../src/commands/status.js').Flag[]} */
-const statusFlags = ['all', 'verbose', 'json', 'fail', 'strict', 'update'];
+const statusFlags = ['all', 'verbose', 'json', 'fail', 'strict', 'update', 'packages'];
 /** @type {import('../src/commands/status.js').Parameter[]} */
 const statusParameters = ['base-lang'];
 
@@ -198,6 +200,33 @@ async function run() {
 	];
 
 	const Visitor = multiVisitor(visitors);
+
+	if (args.packages) {
+		const fs = require('node:fs/promises');
+		const path = require('node:path');
+
+		const entries = await fs.readdir(themePath, {withFileTypes: true});
+		const themePaths = entries
+			.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+			.map((e) => path.join(themePath, e.name));
+
+		if (themePaths.length === 0) {
+			console.error(`Error: No theme packages found in ${themePath}`);
+			exit(1);
+		}
+
+		let totalExitCode = 0;
+		for (const tp of themePaths) {
+			console.log(`\n=== ${path.basename(tp)} ===\n`);
+			const context = await readTheme(tp, Visitor);
+			const exitCode = await command(args, context);
+			totalExitCode += exitCode;
+		}
+
+		exit(totalExitCode);
+		return;
+	}
+
 	const context = await readTheme(themePath, Visitor);
 
 	const exitCode = await command(args, context);
