@@ -1,52 +1,57 @@
 {
-	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-	"vcs": {
-		"enabled": false,
-		"clientKind": "git",
-		"useIgnoreFile": false
+	"$schema": "https://biomejs.dev/schemas/2.4.6/schema.json",
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
 	},
 	"files": {
-		"include": ["./src/**/*.js", "./bin/*.js"],
 		"ignoreUnknown": false,
-		"ignore": ["themes"]
+		"includes": [
+			"./src/**/*.js",
+			"./bin/*.js"
+		]
 	},
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "tab"
 	},
-	"organizeImports": {
-		"enabled": true
+	"javascript": {
+		"formatter": {
+			"bracketSpacing": false,
+			"lineWidth": 100,
+			"quoteStyle": "single"
+		}
 	},
 	"linter": {
 		"enabled": true,
+		"domains": {
+			"project": "all",
+			"test": "all",
+			"types": "all"
+		},
 		"rules": {
-			"all": true,
 			"correctness": {
+				"recommended": true,
 				"noNodejsModules": "off"
 			}
 		}
 	},
-	"javascript": {
-		"formatter": {
-			"quoteStyle": "single",
-			"bracketSpacing": false,
-			"lineWidth": 100
-		}
-	},
 	"overrides": [
 		{
-			"include": ["src/commands/**"],
+			"includes": ["src/commands/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {
-						"noConsole": "off",
-						"noConsoleLog": "off"
+						"noConsole": "off"
 					}
 				}
 			}
 		},
 		{
-			"include": ["src/ast/visitors/"],
+			"includes": ["src/ast/visitors/"],
 			"linter": {
 				"rules": {
 					"style": {
@@ -55,5 +60,10 @@
 				}
 			}
 		}
-	]
+	],
+	"vcs": {
+		"clientKind": "git",
+		"enabled": false,
+		"useIgnoreFile": false
+	}
 }
